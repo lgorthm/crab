@@ -1,9 +1,3 @@
-//! DeepSeek Responses API client (`POST /responses`).
-//!
-//! Stateless: the server does not store conversation history. Multi-turn
-//! callers must resend the full `input` on every request; [`Response::to_input_items`]
-//! converts a previous [`Response`] into those items.
-
 pub mod request;
 pub mod response;
 
@@ -16,22 +10,13 @@ use reqwest::{Client, Url};
 use response::{Response, ResponseFailure};
 
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com";
-/// Long enough for thinking mode plus a large `max_output_tokens`.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
-/// Error bodies are logged and rendered with `Display`; keep them short.
 const MAX_ERROR_BODY_CHARS: usize = 512;
 
-/// Printed instead of a secret value by every `Debug` implementation below.
 const REDACTED: &str = "<redacted>";
-/// Printed for a builder that does not hold a key yet.
 const UNSET: &str = "<unset>";
 
-/// DeepSeek Responses API client (`POST /responses`).
-///
-/// The API key is a secret: this type's `Debug` implementation is written by
-/// hand and never prints it. Do not replace that impl with `#[derive(Debug)]`,
-/// and do not add another field carrying key material.
 #[derive(Clone)]
 pub struct DeepSeekClient {
     http: Client,
@@ -39,6 +24,7 @@ pub struct DeepSeekClient {
     base_url: Url,
 }
 
+// Hand-written: deriving Debug would print the API key.
 impl fmt::Debug for DeepSeekClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DeepSeekClient")
@@ -57,19 +43,6 @@ impl DeepSeekClient {
         DeepSeekClientBuilder::default()
     }
 
-    /// Create a model response (`POST /responses`, non-streaming).
-    ///
-    /// The request is validated locally first; `request.stream == Some(true)`
-    /// is rejected because streaming is not implemented yet.
-    ///
-    /// Note that DeepSeek reports generation failures with HTTP 200 and
-    /// `status: "failed"`, so a successful return only means the HTTP call
-    /// succeeded. Use [`DeepSeekClient::create_checked`] or
-    /// [`Response::ensure_success`] when that distinction matters.
-    ///
-    /// No automatic retry or backoff is performed: 429 and 5xx responses
-    /// surface as [`Error::Api`] with `retry_after` and `request_id` populated
-    /// when the server sends those headers, so callers decide the policy.
     pub async fn create(&self, request: &CreateResponseRequest) -> Result<Response, Error> {
         request.validate().map_err(Error::InvalidRequest)?;
         if request.stream == Some(true) {
@@ -101,10 +74,10 @@ impl DeepSeekClient {
             });
         }
 
+        // DeepSeek reports generation failures as HTTP 200; only the call itself succeeded.
         serde_json::from_str(&body).map_err(|source| Error::Decode { source, body })
     }
 
-    /// Like [`DeepSeekClient::create`], but also requires `status: "completed"`.
     pub async fn create_checked(&self, request: &CreateResponseRequest) -> Result<Response, Error> {
         let response = self.create(request).await?;
         response.ensure_success().map_err(Error::ResponseFailed)?;
@@ -121,10 +94,6 @@ impl DeepSeekClient {
     }
 }
 
-/// Builder for [`DeepSeekClient`].
-///
-/// Like the client, the builder's `Debug` implementation is hand written so a
-/// configured key is only ever rendered as a placeholder.
 pub struct DeepSeekClientBuilder {
     api_key: Option<String>,
     base_url: String,
@@ -168,16 +137,11 @@ impl DeepSeekClientBuilder {
         self
     }
 
-    /// Absolute URL of the API root, for example `https://api.deepseek.com`.
-    ///
-    /// A trailing slash is added when missing, so a proxy prefix such as
-    /// `https://gateway.example/v1` becomes `https://gateway.example/v1/responses`.
     pub fn base_url(mut self, base_url: impl Into<String>) -> Self {
         self.base_url = base_url.into();
         self
     }
 
-    /// Total timeout for one request, including the response body.
     pub fn timeout(mut self, timeout: Duration) -> Self {
         self.timeout = timeout;
         self
@@ -188,10 +152,6 @@ impl DeepSeekClientBuilder {
         self
     }
 
-    /// Allow a plain `http:` base URL (local test servers only).
-    ///
-    /// The default is `false`: sending a bearer token over cleartext is
-    /// rejected at build time.
     pub fn allow_insecure_http(mut self, allow: bool) -> Self {
         self.allow_insecure_http = allow;
         self

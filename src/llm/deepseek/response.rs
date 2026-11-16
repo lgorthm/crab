@@ -1,5 +1,3 @@
-//! Model response from `POST /responses`.
-
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -52,17 +50,11 @@ pub struct Response {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ResponseReasoning>,
 
-    /// Catch-all for fields we do not model yet (store, metadata, etc.).
     #[serde(default, flatten)]
     pub extra: serde_json::Map<String, Value>,
 }
 
 impl Response {
-    /// Concatenate the `output_text` of final-answer message items.
-    ///
-    /// Items whose `phase` is present but not `final_answer` are skipped, so
-    /// intermediate commentary never leaks into the returned answer. Items
-    /// without a `phase` are kept for compatibility.
     pub fn output_text(&self) -> String {
         self.output
             .iter()
@@ -81,10 +73,6 @@ impl Response {
             .join("")
     }
 
-    /// The `(call_id, name, arguments)` of every complete function call.
-    ///
-    /// Incomplete items (missing any of the three fields) are skipped; inspect
-    /// [`Response::output`] directly when that distinction matters.
     pub fn function_calls(&self) -> Vec<(&str, &str, &str)> {
         self.output
             .iter()
@@ -100,8 +88,6 @@ impl Response {
             .collect()
     }
 
-    /// Every content annotation in the response (for example web-search
-    /// `url_citation` annotations).
     pub fn annotations(&self) -> Vec<&Value> {
         self.output
             .iter()
@@ -118,16 +104,6 @@ impl Response {
             .collect()
     }
 
-    /// Build the `input` items that replay this response in a follow-up turn.
-    ///
-    /// Items that cannot be expressed as request input (for example
-    /// `tool_search_call`, or a malformed item missing `call_id`) are skipped.
-    /// Use [`TryFrom::try_from`] on [`ResponseInputItem`] to observe those
-    /// failures instead.
-    ///
-    /// A converted `function_call` still needs its matching
-    /// `function_call_output` appended before the history is sent; the API
-    /// rejects unpaired calls.
     pub fn to_input_items(&self) -> Vec<ResponseInputItem> {
         self.output
             .iter()
@@ -135,12 +111,6 @@ impl Response {
             .collect()
     }
 
-    /// Fail unless the response reached `completed`.
-    ///
-    /// DeepSeek reports generation failures with HTTP 200 and
-    /// `status: "failed"` (and truncation as `status: "incomplete"`), so an
-    /// `Ok` from [`super::DeepSeekClient::create`] does not by itself mean the
-    /// model produced an answer. `create_checked` applies this check.
     pub fn ensure_success(&self) -> Result<(), Box<ResponseFailure>> {
         if matches!(&self.status, ResponseStatus::Completed) {
             return Ok(());
@@ -162,7 +132,6 @@ fn is_final_message(phase: &Option<String>) -> bool {
     phase.as_deref().is_none_or(|phase| phase == "final_answer")
 }
 
-/// Description of a response that did not reach `completed`.
 #[derive(Debug, Clone)]
 pub struct ResponseFailure {
     pub id: String,
@@ -198,7 +167,6 @@ impl fmt::Display for ResponseFailure {
 
 impl std::error::Error for ResponseFailure {}
 
-/// Response status. Unknown values are preserved instead of failing the decode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum ResponseStatus {
@@ -253,7 +221,6 @@ pub struct IncompleteDetails {
     pub reason: Option<IncompleteReason>,
 }
 
-/// Why a response is incomplete. Unknown values are preserved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum IncompleteReason {
@@ -288,10 +255,6 @@ impl From<IncompleteReason> for String {
     }
 }
 
-/// The `reasoning` block echoed in a response.
-///
-/// Unlike the request-side [`super::request::ReasoningConfig`], this type keeps
-/// `summary` (currently always `null`) and any future fields.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ResponseReasoning {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -348,7 +311,6 @@ pub enum ResponseOutputItem {
         call_id: Option<String>,
         #[serde(default)]
         name: Option<String>,
-        /// OpenAI-compatible custom tool payload (`apply_patch` sends `input`).
         #[serde(default)]
         input: Option<String>,
         #[serde(default)]
@@ -380,16 +342,10 @@ pub enum ResponseOutputItem {
         #[serde(default)]
         call_id: Option<String>,
     },
-    /// An output item type this crate does not model yet.
-    ///
-    /// Only a marker is kept: the item's payload is not preserved, so it cannot
-    /// be replayed by [`Response::to_input_items`].
     #[serde(other)]
     Unknown,
 }
 
-/// Status of one output item. `failed` is a documented value for failed
-/// `web_search_call` items; unknown values are preserved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum OutputItemStatus {
@@ -485,12 +441,9 @@ pub struct ServerToolUse {
     pub tool_image_search: Option<u64>,
 }
 
-/// Why an output item cannot be turned back into request input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ItemConversionError {
-    /// A field the request format requires is missing on the output item.
     MissingField(&'static str),
-    /// The item type has no request-side equivalent.
     Unsupported(&'static str),
 }
 
@@ -712,7 +665,6 @@ mod tests {
             other => panic!("unexpected item: {other:?}"),
         }
 
-        // A failed tool call must not take the rest of the response down with it.
         assert_eq!(response.output_text(), "The page was unavailable.");
     }
 

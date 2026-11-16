@@ -1,10 +1,3 @@
-//! Request body for `POST /responses`, including tools and input items.
-//!
-//! The types in this module model the DeepSeek Responses API request format.
-//! Invalid combinations are either impossible to build (one enum case per input
-//! item) or rejected locally by [`CreateResponseRequest::validate`] before a
-//! request is sent.
-
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
@@ -12,12 +5,9 @@ use serde_json::Value;
 
 use super::response::OutputItemStatus;
 
-/// Maximum length of an `input_image.image_url`, per the API docs.
 const MAX_IMAGE_URL_CHARS: usize = 8192;
-/// Maximum length of a function tool name, per the API docs.
 const MAX_TOOL_NAME_LEN: usize = 128;
 
-/// Body for `POST /responses`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateResponseRequest {
     pub model: String,
@@ -34,8 +24,6 @@ pub struct CreateResponseRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_output_tokens: Option<u32>,
 
-    /// Always sent as `false` (or omitted) by the non-streaming client. The
-    /// client rejects `Some(true)` with [`super::Error::StreamingNotImplemented`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
 
@@ -173,10 +161,6 @@ impl CreateResponseRequest {
         self
     }
 
-    /// Check the constraints the API enforces with a `400`.
-    ///
-    /// [`super::DeepSeekClient::create`] calls this before sending, so callers
-    /// normally do not need to invoke it directly.
     pub fn validate(&self) -> Result<(), String> {
         self.validate_input()?;
         self.validate_text()?;
@@ -343,7 +327,6 @@ impl CreateResponseRequest {
     }
 }
 
-/// Model input: a plain string (treated as one `user` message) or an item list.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Input {
@@ -351,7 +334,6 @@ pub enum Input {
     Items(Vec<ResponseInputItem>),
 }
 
-/// Configuration of the thinking mode.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReasoningConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -366,11 +348,6 @@ impl ReasoningConfig {
     }
 }
 
-/// Thinking effort.
-///
-/// `minimal`, `medium` and `xhigh` are accepted by the API for compatibility
-/// with existing clients (they are mapped to `low` or `high`). Truly unknown
-/// values are kept for decoding tolerance and rejected when a request is sent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "String", into = "String")]
 pub enum ReasoningEffort {
@@ -420,7 +397,6 @@ impl From<ReasoningEffort> for String {
     }
 }
 
-/// Text output configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -435,8 +411,6 @@ impl TextConfig {
     }
 }
 
-/// Output format. `JsonSchema` carries the required `name` and `schema`, so an
-/// invalid `json_schema` body is impossible to build.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TextFormat {
@@ -454,7 +428,6 @@ impl TextFormat {
     }
 }
 
-/// Model content safety (DeepSeek extension).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SafetyCheck {
     pub level: SafetyLevel,
@@ -473,7 +446,6 @@ pub enum SafetyLevel {
     High,
 }
 
-/// Ask the response to carry a short conversation title (DeepSeek extension).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TitleConfig {
     pub enabled: bool,
@@ -490,7 +462,6 @@ pub struct ResponseTool {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// JSON Schema object describing function parameters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Value>,
 }
@@ -509,7 +480,6 @@ impl ResponseTool {
         }
     }
 
-    /// The `apply_patch` custom tool (Codex compatibility).
     pub fn custom(name: impl Into<String>) -> Self {
         Self {
             tool_type: ToolType::Custom,
@@ -572,8 +542,6 @@ pub enum ToolChoiceMode {
     Required,
 }
 
-/// Forces the model to call a specific function. `name` is required by the API
-/// whenever `type` is `function`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamedToolChoice {
     #[serde(rename = "type")]
@@ -596,52 +564,45 @@ pub enum NamedToolChoiceType {
     Function,
 }
 
-/// One item of the `input` list.
-///
-/// Each item type is its own variant, so a `function_call` can never be built
-/// without a `call_id` and a `message` can never be built without a role.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseInputItem {
-    /// A chat message. `content` may be a plain string or content parts.
     Message {
         role: MessageRole,
         content: InputContent,
     },
 
-    /// A previous function call. Must be paired with a `FunctionCallOutput`.
     FunctionCall {
         call_id: String,
         name: String,
         arguments: String,
     },
 
-    /// The result of a previous function call.
-    FunctionCallOutput { call_id: String, output: ToolOutput },
+    FunctionCallOutput {
+        call_id: String,
+        output: ToolOutput,
+    },
 
-    /// A previous `apply_patch` custom tool call.
     CustomToolCall {
         call_id: String,
         name: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         input: Option<String>,
-        /// Some servers send the payload as `arguments`; kept for round-trips.
+        // Some servers put the custom tool payload here instead of `input`.
         #[serde(skip_serializing_if = "Option::is_none")]
         arguments: Option<String>,
     },
 
-    /// The result of a previous custom tool call.
-    CustomToolCallOutput { call_id: String, output: ToolOutput },
+    CustomToolCallOutput {
+        call_id: String,
+        output: ToolOutput,
+    },
 
-    /// Chain-of-thought to replay. Only `reasoning_text` parts are accepted.
     Reasoning {
         content: Vec<ResponseInputContentPart>,
     },
 
-    /// A `web_search_call` returned by a previous response.
-    ///
-    /// Pass the item back unchanged (including `kind` and `signature`) so its
-    /// search results or read pages are restored into the context.
+    // Replay unchanged: `signature` restores the search results or read pages.
     WebSearchCall {
         #[serde(skip_serializing_if = "Option::is_none")]
         id: Option<String>,
@@ -932,7 +893,6 @@ fn is_valid_function_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
-/// A chat message role.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MessageRole {
@@ -942,7 +902,6 @@ pub enum MessageRole {
     Developer,
 }
 
-/// Message content: a plain string or content parts.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum InputContent {
@@ -968,7 +927,6 @@ impl From<Vec<ResponseInputContentPart>> for InputContent {
     }
 }
 
-/// Tool output: a plain string or content parts (text and images).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ToolOutput {
@@ -994,7 +952,6 @@ impl From<Vec<ResponseInputContentPart>> for ToolOutput {
     }
 }
 
-/// One content part of a message or tool output.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseInputContentPart {
